@@ -65,8 +65,9 @@ sudo mv update-cloudflare-dns.conf /usr/local/bin/update-cloudflare-dns.conf
 
 | **Option**                | **Example**      | **Description**                                                                                                           |
 | ------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| what_ip                   | internal         | Which IP should be used for the record: internal/external                                                                 |
-| dns_record                | ddns.example.com | DNS **A** record which will be updated, you can pass multiple **A** records separated by comma                            |
+| what_ip                   | internal         | Which IP should be used for the record: internal/external/globalv6                                                        |
+| dns_record                | ddns.example.com | DNS record which will be updated, you can pass multiple records of the same type separated by commas                      |
+| dns_record_type           | A                | Record type to update, set to AAAA for IPv6                                                                               |
 | cloudflare_zone_api_token | ChangeMe         | Cloudflare API Token **KEEP IT PRIVATE!!!!**                                                                              |
 | zoneid                    | ChangeMe         | Cloudflare's [Zone ID](https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/) |
 | proxied                   | false            | Use Cloudflare proxy on dns record true/false                                                                             |
@@ -159,7 +160,7 @@ Example:
 
 ## Limitations
 
-- Does not support IPv6
+- IPv6 address selection always picks the first IPv6 global address on the default interface
 
 ## License
 

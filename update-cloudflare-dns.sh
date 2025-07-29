@@ -27,6 +27,8 @@ else
   fi
 fi
 
+dns_record_type=${dns_record_type:="A"}
+
 ### Check validity of "ttl" parameter
 if [ "${ttl}" -lt 120 ] || [ "${ttl}" -gt 7200 ] && [ "${ttl}" -ne 1 ]; then
   echo "Error! ttl out of range (120-7200) or not set to 1"
@@ -40,8 +42,8 @@ if [ "${proxied}" != "false" ] && [ "${proxied}" != "true" ]; then
 fi
 
 ### Check validity of "what_ip" parameter
-if [ "${what_ip}" != "external" ] && [ "${what_ip}" != "internal" ]; then
-  echo 'Error! Incorrect "what_ip" parameter, choose "external" or "internal"'
+if [ "${what_ip}" != "external" ] && [ "${what_ip}" != "internal" ] && [ "${what_ip}" != "globalv6" ]; then
+  echo 'Error! Incorrect "what_ip" parameter, choose "external", "globalv6", or "internal"'
   exit 0
 fi
 
@@ -88,6 +90,22 @@ if [ "${what_ip}" == "internal" ]; then
   echo "==> Internal ${interface} IP is: $ip"
 fi
 
+if [ "${what_ip}" == "globalv6" ]; then
+  if which ip >/dev/null; then
+    ### "ip route get" (linux)
+    interface=$(ip -6 route get 2606:4700:4700::1111 | awk '/dev/ {print $7}')
+    ip=$(ip -o -6 addr show eth0 scope global | awk '{print $4}' | grep -v "^fd" | cut -d/ -f 1 | head -n 1)
+  else
+    interface=$(route -n get -inet6 2606:4700:4700::1111 | awk '/interface:/ {print $2}')
+    ip=$(ifconfig ${interface} inet6 | grep inet6 | grep -v deprecated | awk '{print $2}' | grep -v "^fd" | grep -v "^fe80::" | head -n 1)
+  fi
+  if [ -z "$ip" ]; then
+    echo "Error! Can't read ip from ${interface}"
+    exit 0
+  fi
+  echo "==> Global IPv6 IP for ${interface} is: $ip"
+fi
+
 ### Build coma separated array fron dns_record parameter to update multiple A records
 IFS=',' read -d '' -ra dns_records <<<"$dns_record,"
 unset 'dns_records[${#dns_records[@]}-1]'
@@ -98,10 +116,10 @@ for record in "${dns_records[@]}"; do
   if [ "${proxied}" == "false" ]; then
     ### Check if "nslookup" command is present
     if which nslookup >/dev/null; then
-      dns_record_ip=$(nslookup ${record} 1.1.1.1 | awk '/Address/ { print $2 }' | sed -n '2p')
+      dns_record_ip=$(nslookup -query=${dns_record_type} ${record} 1.1.1.1 | awk '/Address/ { print $2 }' | sed -n '2p')
     else
       ### if no "nslookup" command use "host" command
-      dns_record_ip=$(host -t A ${record} 1.1.1.1 | awk '/has address/ { print $4 }' | sed -n '1p')
+      dns_record_ip=$(host -t ${dns_record_type} ${record} 1.1.1.1 | awk '/has address/ { print $4 }' | sed -n '1p')
     fi
 
     if [ -z "$dns_record_ip" ]; then
@@ -113,7 +131,7 @@ for record in "${dns_records[@]}"; do
 
   ### Get the dns record id and current proxy status from Cloudflare API when proxied is "true"
   if [ "${proxied}" == "true" ]; then
-    dns_record_info=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zoneid/dns_records?type=A&name=$record" \
+    dns_record_info=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zoneid/dns_records?type=${dns_record_type}&name=$record" \
       -H "Authorization: Bearer $cloudflare_zone_api_token" \
       -H "Content-Type: application/json")
     if [[ ${dns_record_info} == *"\"success\":false"* ]]; then
@@ -134,7 +152,7 @@ for record in "${dns_records[@]}"; do
   echo "==> DNS record of ${record} is: ${dns_record_ip}. Trying to update..."
 
   ### Get the dns record information from Cloudflare API
-  cloudflare_record_info=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zoneid/dns_records?type=A&name=$record" \
+  cloudflare_record_info=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$zoneid/dns_records?type=${dns_record_type}&name=$record" \
     -H "Authorization: Bearer $cloudflare_zone_api_token" \
     -H "Content-Type: application/json")
   if [[ ${cloudflare_record_info} == *"\"success\":false"* ]]; then
@@ -150,7 +168,7 @@ for record in "${dns_records[@]}"; do
   update_dns_record=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$zoneid/dns_records/$cloudflare_dns_record_id" \
     -H "Authorization: Bearer $cloudflare_zone_api_token" \
     -H "Content-Type: application/json" \
-    --data "{\"type\":\"A\",\"name\":\"$record\",\"content\":\"$ip\",\"ttl\":$ttl,\"proxied\":$proxied}")
+    --data "{\"type\":\"${dns_record_type}\",\"name\":\"$record\",\"content\":\"$ip\",\"ttl\":$ttl,\"proxied\":$proxied}")
   if [[ ${update_dns_record} == *"\"success\":false"* ]]; then
     echo ${update_dns_record}
     echo "Error! Update failed"
@@ -167,7 +185,7 @@ for record in "${dns_records[@]}"; do
 
   if [ ${notify_me_telegram} == "yes" ]; then
     telegram_notification=$(
-      curl -s -X GET "https://api.telegram.org/bot${telegram_bot_API_Token}/sendMessage?chat_id=${telegram_chat_id}" --data-urlencode "text=${record} DNS record updated to: ${ip}"
+      curl -s -X GET "https://api.telegram.org/bot${telegram_bot_API_Token}/sendMessage?chat_id=${telegram_chat_id}" --data-urlencode "text=${record} ${dns_record_type} DNS record updated to: ${ip}"
     )
     if [[ ${telegram_notification=} == *"\"ok\":false"* ]]; then
       echo ${telegram_notification=}
